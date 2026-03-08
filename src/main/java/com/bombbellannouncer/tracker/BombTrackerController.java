@@ -17,7 +17,6 @@ import com.bombbellannouncer.mixin.client.ChatHudAccessor;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,6 +52,7 @@ public final class BombTrackerController {
 	private final Map<BombType, BombInfo> currentServerBombs = new EnumMap<>(BombType.class);
 	private final SubscriptionEvaluator subscriptionEvaluator = new SubscriptionEvaluator();
 	private final SubscriptionNotificationState subscriptionNotificationState = new SubscriptionNotificationState();
+	private final ActiveBombListViewBuilder activeBombListViewBuilder = new ActiveBombListViewBuilder();
 
 	private String currentWorldName = "";
 	private int tickCounter;
@@ -81,6 +81,10 @@ public final class BombTrackerController {
 	public Collection<BombInfo> getActiveBombsSnapshot(long nowMillis) {
 		pruneExpiredBombs(nowMillis);
 		return activeBombs.asCollection();
+	}
+
+	public ActiveBombListView describeActiveBombs(long nowMillis) {
+		return activeBombListViewBuilder.build(getActiveBombsSnapshot(nowMillis), config.subscribedCombos(), nowMillis);
 	}
 
 	public void onSubscriptionAdded(SubscriptionTarget subscriptionTarget) {
@@ -357,31 +361,45 @@ public final class BombTrackerController {
 		}
 
 		String world = match.world();
+		String lobbyCode = match.lobbyCode();
 		String remaining = formatRemainingTime(match.remainingMillis(nowMillis));
+		MutableText summary = Text.literal(buildSubscriptionSummary(match, world, remaining))
+			.setStyle(Style.EMPTY
+				.withColor(Formatting.WHITE)
+				.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, buildSubscriptionHoverText(match))));
 		MutableText message = Text.literal("WynnData: ")
 			.formatted(Formatting.AQUA)
-			.append(Text.literal(buildSubscriptionSummary(match)))
-			.append(Text.literal(" on " + world + ", " + remaining + " left. ").formatted(Formatting.WHITE))
+			.append(summary)
+			.append(Text.literal(" "))
 			.append(Text.literal("[Switch]")
 				.setStyle(Style.EMPTY
 					.withColor(Formatting.GREEN)
 					.withUnderline(true)
-					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/switch " + world.toLowerCase(Locale.ROOT)))
-					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Text.literal("/switch " + world.toLowerCase(Locale.ROOT))))));
+					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/switch " + lobbyCode))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Text.literal("/switch " + lobbyCode)))));
 		client.player.sendMessage(message, false);
 	}
 
-	private static String buildSubscriptionSummary(SubscriptionMatch match) {
+	private static String buildSubscriptionSummary(SubscriptionMatch match, String world, String remaining) {
 		if (match.target() instanceof com.bombbellannouncer.subscription.BombSubscription) {
 			BombInfo bombInfo = match.bombs().getFirst();
-			return match.target().displayName() + " by " + bombInfo.user() + " active";
+			return match.target().displayName() + " by " + formatBombUser(bombInfo) + " on " + world + " for " + remaining + ".";
 		}
 
-		String details = match.bombs().stream()
-			.map(bombInfo -> bombInfo.bombType().displayName() + ": " + bombInfo.user())
-			.reduce((left, right) -> left + ", " + right)
-			.orElse("active");
-		return match.target().displayName() + " active (" + details + ")";
+		return match.target().displayName() + " on " + world + " for " + remaining + ".";
+	}
+
+	private static Text buildSubscriptionHoverText(SubscriptionMatch match) {
+		MutableText hover = Text.literal("World: " + match.world());
+		for (BombInfo bombInfo : match.bombs()) {
+			hover.append(Text.literal("\n" + bombInfo.bombType().displayName() + ": " + formatBombUser(bombInfo)));
+		}
+		return hover;
+	}
+
+	private static String formatBombUser(BombInfo bombInfo) {
+		String user = bombInfo.user();
+		return user == null || user.isBlank() ? "Unknown" : user;
 	}
 
 	private static String formatRemainingTime(long remainingMillis) {
