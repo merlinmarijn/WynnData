@@ -1,0 +1,16 @@
+.git
+.gradle
+.idea
+.vscode
+build
+out
+classes
+run
+logs
+relay/build
+relay/data
+relay/relay
+**/*.log
+**/*.hprof
+**/*.jfr
+**/.DS_Store

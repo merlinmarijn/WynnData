@@ -1,0 +1,24 @@
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    container_name: wynndata-relay
+    env_file:
+      - .env
+    environment:
+      SQLITE_PATH: /data/relay.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  relay-data:

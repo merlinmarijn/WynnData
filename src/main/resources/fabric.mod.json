@@ -1,0 +1,35 @@
+{
+	"schemaVersion": 1,
+	"id": "wynndata",
+	"version": "${version}",
+	"name": "WynnData",
+	"description": "Wynncraft bomb tracking and Discord relay integration for Minecraft 1.21.4.",
+	"authors": [
+		"Marijn"
+	],
+	"license": "All-Rights-Reserved",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.bombbellannouncer.BombbellAnnouncerMod"
+		],
+		"client": [
+			"com.bombbellannouncer.BombbellAnnouncerClientMod"
+		],
+		"modmenu": [
+			"com.bombbellannouncer.modmenu.BombbellAnnouncerModMenuIntegration"
+		]
+	},
+	"mixins": [
+		"wynndata.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.17.2",
+		"minecraft": "~1.21.4",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}
