@@ -11,7 +11,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - relay-data:/data
+      - ./data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
@@ -19,6 +19,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
-volumes:
-  relay-data:

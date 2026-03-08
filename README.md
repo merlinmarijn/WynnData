@@ -110,7 +110,10 @@ docker compose -f relay/compose.yaml logs -f
 Notes:
 
 - the relay listens on container port `8080`
-- SQLite data is persisted in the named Docker volume `relay-data`
-- the Compose file forces `SQLITE_PATH=/data/relay.db` so the database lives in the mounted volume
+- SQLite data is persisted on the host at `relay/data/relay.db`
+- the Compose file forces `SQLITE_PATH=/data/relay.db` so the database lives in the mounted `relay/data` directory
 - stop it with `docker compose -f relay/compose.yaml down`
-- remove the persistent database too with `docker compose -f relay/compose.yaml down -v`
+- `docker compose -f relay/compose.yaml down` does not remove the database
+- rebuilding with `docker compose -f relay/compose.yaml up --build -d` keeps the existing relay connections
+- delete `relay/data/relay.db` if you intentionally want to reset all persisted relay state
+- if you are migrating from an older Docker named volume setup, copy the old `relay.db` into `relay/data/relay.db` before starting the new container
