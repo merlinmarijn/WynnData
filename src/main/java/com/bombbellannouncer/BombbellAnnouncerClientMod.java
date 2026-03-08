@@ -1,5 +1,6 @@
 package com.bombbellannouncer;
 
+import com.bombbellannouncer.command.WynnDataClientCommands;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
@@ -22,6 +23,7 @@ public final class BombbellAnnouncerClientMod implements ClientModInitializer {
 		BombbellAnnouncerConfig loadedConfig = getConfig();
 		tracker = new BombTrackerController(loadedConfig, getObservationPublisher());
 		tracker.register();
+		WynnDataClientCommands.register(() -> tracker, loadedConfig);
 
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
 			getObservationPublisher().onClientReconnect();

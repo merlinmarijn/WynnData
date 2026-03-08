@@ -8,11 +8,16 @@ import com.bombbellannouncer.bomb.BombSource;
 import com.bombbellannouncer.bomb.BombType;
 import com.bombbellannouncer.config.BombbellAnnouncerConfig;
 import com.bombbellannouncer.relayclient.BombObservationPublisher;
+import com.bombbellannouncer.subscription.SubscriptionEvaluator;
+import com.bombbellannouncer.subscription.SubscriptionMatch;
+import com.bombbellannouncer.subscription.SubscriptionNotificationState;
+import com.bombbellannouncer.subscription.SubscriptionTarget;
 import com.bombbellannouncer.mixin.client.BossBarHudAccessor;
 import com.bombbellannouncer.mixin.client.ChatHudAccessor;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,7 +31,12 @@ import net.minecraft.client.gui.hud.ChatHud;
 import net.minecraft.client.gui.hud.ChatHudLine;
 import net.minecraft.client.gui.hud.ClientBossBar;
 import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
+import net.minecraft.text.MutableText;
+import net.minecraft.text.Style;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 public final class BombTrackerController {
 	private static final int WORLD_POLL_INTERVAL_TICKS = 10;
@@ -41,6 +51,8 @@ public final class BombTrackerController {
 	private final RecentNotificationCache recentProcessedMessages = new RecentNotificationCache(PROCESSED_MESSAGE_TTL_MILLIS);
 	private final ActiveBombContainer activeBombs = new ActiveBombContainer();
 	private final Map<BombType, BombInfo> currentServerBombs = new EnumMap<>(BombType.class);
+	private final SubscriptionEvaluator subscriptionEvaluator = new SubscriptionEvaluator();
+	private final SubscriptionNotificationState subscriptionNotificationState = new SubscriptionNotificationState();
 
 	private String currentWorldName = "";
 	private int tickCounter;
@@ -69,6 +81,23 @@ public final class BombTrackerController {
 	public Collection<BombInfo> getActiveBombsSnapshot(long nowMillis) {
 		pruneExpiredBombs(nowMillis);
 		return activeBombs.asCollection();
+	}
+
+	public void onSubscriptionAdded(SubscriptionTarget subscriptionTarget) {
+		long nowMillis = System.currentTimeMillis();
+		subscriptionNotificationState.clearTarget(subscriptionTarget);
+		List<SubscriptionMatch> matches = subscriptionEvaluator.findMatchesForTarget(getActiveBombsSnapshot(nowMillis), subscriptionTarget, nowMillis);
+		for (SubscriptionMatch match : subscriptionNotificationState.collectNewMatches(matches)) {
+			sendSubscriptionNotification(match, nowMillis);
+		}
+	}
+
+	public void onSubscriptionRemoved(SubscriptionTarget subscriptionTarget) {
+		subscriptionNotificationState.clearTarget(subscriptionTarget);
+	}
+
+	public void onSubscriptionsCleared() {
+		subscriptionNotificationState.clearAll();
 	}
 
 	private void handleIncomingMessage(Text message) {
@@ -304,7 +333,69 @@ public final class BombTrackerController {
 	}
 
 	private void scheduleSnapshotPublish(boolean forceHeartbeat, long nowMillis) {
+		evaluateSubscriptions(nowMillis);
 		observationPublisher.requestPublish(getActiveBombsSnapshot(nowMillis), forceHeartbeat);
+	}
+
+	private void evaluateSubscriptions(long nowMillis) {
+		List<SubscriptionMatch> currentMatches = subscriptionEvaluator.findMatches(
+			getActiveBombsSnapshot(nowMillis),
+			config.subscribedBombTypes().stream().map(com.bombbellannouncer.subscription.BombSubscription::new).toList(),
+			config.subscribedCombos(),
+			nowMillis
+		);
+
+		for (SubscriptionMatch match : subscriptionNotificationState.collectNewMatches(currentMatches)) {
+			sendSubscriptionNotification(match, nowMillis);
+		}
+	}
+
+	private void sendSubscriptionNotification(SubscriptionMatch match, long nowMillis) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.player == null) {
+			return;
+		}
+
+		String world = match.world();
+		String remaining = formatRemainingTime(match.remainingMillis(nowMillis));
+		MutableText message = Text.literal("WynnData: ")
+			.formatted(Formatting.AQUA)
+			.append(Text.literal(buildSubscriptionSummary(match)))
+			.append(Text.literal(" on " + world + ", " + remaining + " left. ").formatted(Formatting.WHITE))
+			.append(Text.literal("[Switch]")
+				.setStyle(Style.EMPTY
+					.withColor(Formatting.GREEN)
+					.withUnderline(true)
+					.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/switch " + world.toLowerCase(Locale.ROOT)))
+					.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Text.literal("/switch " + world.toLowerCase(Locale.ROOT))))));
+		client.player.sendMessage(message, false);
+	}
+
+	private static String buildSubscriptionSummary(SubscriptionMatch match) {
+		if (match.target() instanceof com.bombbellannouncer.subscription.BombSubscription) {
+			BombInfo bombInfo = match.bombs().getFirst();
+			return match.target().displayName() + " by " + bombInfo.user() + " active";
+		}
+
+		String details = match.bombs().stream()
+			.map(bombInfo -> bombInfo.bombType().displayName() + ": " + bombInfo.user())
+			.reduce((left, right) -> left + ", " + right)
+			.orElse("active");
+		return match.target().displayName() + " active (" + details + ")";
+	}
+
+	private static String formatRemainingTime(long remainingMillis) {
+		long totalSeconds = Math.max(1L, Math.round(remainingMillis / 1_000.0d));
+		if (totalSeconds < 60L) {
+			return totalSeconds + "s";
+		}
+
+		long minutes = totalSeconds / 60L;
+		long seconds = totalSeconds % 60L;
+		if (seconds == 0L) {
+			return minutes + "m";
+		}
+		return minutes + "m " + seconds + "s";
 	}
 
 	private static final class ActiveBombContainer {

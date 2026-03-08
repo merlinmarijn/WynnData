@@ -1,6 +1,9 @@
 package com.bombbellannouncer.config;
 
+import com.bombbellannouncer.bomb.BombType;
 import com.bombbellannouncer.protocol.ReporterRole;
+import com.bombbellannouncer.subscription.ComboSubscription;
+import com.bombbellannouncer.subscription.SubscriptionParser;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
@@ -10,6 +13,11 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
 import org.slf4j.Logger;
 
 public final class BombbellAnnouncerConfig {
@@ -26,6 +34,8 @@ public final class BombbellAnnouncerConfig {
 	private String linkedDiscordUser;
 	private String dashboardName;
 	private ReporterRole reporterRole;
+	private final Set<BombType> subscribedBombTypes;
+	private final List<ComboSubscription> subscribedCombos;
 	private long revision;
 
 	private BombbellAnnouncerConfig(
@@ -37,7 +47,9 @@ public final class BombbellAnnouncerConfig {
 		String contributorToken,
 		String linkedDiscordUser,
 		String dashboardName,
-		ReporterRole reporterRole
+		ReporterRole reporterRole,
+		Set<BombType> subscribedBombTypes,
+		List<ComboSubscription> subscribedCombos
 	) {
 		this.configPath = configPath;
 		this.logger = logger;
@@ -48,6 +60,11 @@ public final class BombbellAnnouncerConfig {
 		this.linkedDiscordUser = sanitize(linkedDiscordUser);
 		this.dashboardName = sanitize(dashboardName);
 		this.reporterRole = reporterRole == null ? ReporterRole.INELIGIBLE : reporterRole;
+		this.subscribedBombTypes = subscribedBombTypes == null || subscribedBombTypes.isEmpty()
+			? EnumSet.noneOf(BombType.class)
+			: EnumSet.copyOf(subscribedBombTypes);
+		this.subscribedCombos = subscribedCombos == null ? new ArrayList<>() : new ArrayList<>(subscribedCombos);
+		this.subscribedCombos.sort(Comparator.comparing(ComboSubscription::encoded));
 	}
 
 	public static BombbellAnnouncerConfig load(Path configDirectory, Logger logger) {
@@ -55,7 +72,7 @@ public final class BombbellAnnouncerConfig {
 
 		if (Files.notExists(configPath)) {
 			writeDefaultConfig(configPath, logger);
-			return new BombbellAnnouncerConfig(configPath, logger, true, "", "", "", "", "", ReporterRole.INELIGIBLE);
+			return emptyConfig(configPath, logger);
 		}
 
 		try (Reader reader = Files.newBufferedReader(configPath, StandardCharsets.UTF_8)) {
@@ -63,7 +80,7 @@ public final class BombbellAnnouncerConfig {
 			return sanitize(configPath, logger, file);
 		} catch (IOException | JsonParseException exception) {
 			logger.warn("Failed to read config from {}", configPath, exception);
-			return new BombbellAnnouncerConfig(configPath, logger, true, "", "", "", "", "", ReporterRole.INELIGIBLE);
+			return emptyConfig(configPath, logger);
 		}
 	}
 
@@ -183,6 +200,58 @@ public final class BombbellAnnouncerConfig {
 		return revision;
 	}
 
+	public synchronized Set<BombType> subscribedBombTypes() {
+		return subscribedBombTypes.isEmpty() ? EnumSet.noneOf(BombType.class) : EnumSet.copyOf(subscribedBombTypes);
+	}
+
+	public synchronized List<ComboSubscription> subscribedCombos() {
+		return List.copyOf(subscribedCombos);
+	}
+
+	public synchronized boolean subscribeBombType(BombType bombType) {
+		if (subscribedBombTypes.add(bombType)) {
+			revision++;
+			return true;
+		}
+		return false;
+	}
+
+	public synchronized boolean unsubscribeBombType(BombType bombType) {
+		if (subscribedBombTypes.remove(bombType)) {
+			revision++;
+			return true;
+		}
+		return false;
+	}
+
+	public synchronized boolean subscribeCombo(ComboSubscription comboSubscription) {
+		if (subscribedCombos.contains(comboSubscription)) {
+			return false;
+		}
+		subscribedCombos.add(comboSubscription);
+		subscribedCombos.sort(Comparator.comparing(ComboSubscription::encoded));
+		revision++;
+		return true;
+	}
+
+	public synchronized boolean unsubscribeCombo(ComboSubscription comboSubscription) {
+		if (subscribedCombos.remove(comboSubscription)) {
+			revision++;
+			return true;
+		}
+		return false;
+	}
+
+	public synchronized boolean clearSubscriptions() {
+		if (subscribedBombTypes.isEmpty() && subscribedCombos.isEmpty()) {
+			return false;
+		}
+		subscribedBombTypes.clear();
+		subscribedCombos.clear();
+		revision++;
+		return true;
+	}
+
 	public synchronized void save() {
 		try {
 			Files.createDirectories(configPath.getParent());
@@ -229,7 +298,7 @@ public final class BombbellAnnouncerConfig {
 
 	private static BombbellAnnouncerConfig sanitize(Path configPath, Logger logger, ConfigFile file) {
 		if (file == null) {
-			return new BombbellAnnouncerConfig(configPath, logger, true, "", "", "", "", "", ReporterRole.INELIGIBLE);
+			return emptyConfig(configPath, logger);
 		}
 
 		return new BombbellAnnouncerConfig(
@@ -241,7 +310,25 @@ public final class BombbellAnnouncerConfig {
 			file.contributorToken,
 			file.linkedDiscordUser,
 			file.dashboardName,
-			ReporterRole.fromName(file.reporterRole).orElse(ReporterRole.INELIGIBLE)
+			ReporterRole.fromName(file.reporterRole).orElse(ReporterRole.INELIGIBLE),
+			parseSubscribedBombTypes(file.subscribedBombTypes),
+			parseSubscribedCombos(file.subscribedCombos)
+		);
+	}
+
+	private static BombbellAnnouncerConfig emptyConfig(Path configPath, Logger logger) {
+		return new BombbellAnnouncerConfig(
+			configPath,
+			logger,
+			true,
+			"",
+			"",
+			"",
+			"",
+			"",
+			ReporterRole.INELIGIBLE,
+			EnumSet.noneOf(BombType.class),
+			List.of()
 		);
 	}
 
@@ -305,6 +392,8 @@ public final class BombbellAnnouncerConfig {
 		String linkedDiscordUser = "";
 		String dashboardName = "";
 		String reporterRole = ReporterRole.INELIGIBLE.name();
+		List<String> subscribedBombTypes = new ArrayList<>();
+		List<String> subscribedCombos = new ArrayList<>();
 
 		static ConfigFile from(BombbellAnnouncerConfig config) {
 			ConfigFile file = new ConfigFile();
@@ -315,7 +404,47 @@ public final class BombbellAnnouncerConfig {
 			file.linkedDiscordUser = config.linkedDiscordUser;
 			file.dashboardName = config.dashboardName;
 			file.reporterRole = config.reporterRole.name();
+			file.subscribedBombTypes = config.subscribedBombTypes.stream()
+				.sorted(Comparator.comparingInt(Enum::ordinal))
+				.map(BombType::name)
+				.toList();
+			file.subscribedCombos = config.subscribedCombos.stream()
+				.sorted(Comparator.comparing(ComboSubscription::encoded))
+				.map(ComboSubscription::encoded)
+				.toList();
 			return file;
 		}
+	}
+
+	private static Set<BombType> parseSubscribedBombTypes(List<String> rawValues) {
+		EnumSet<BombType> bombTypes = EnumSet.noneOf(BombType.class);
+		if (rawValues == null) {
+			return bombTypes;
+		}
+		for (String rawValue : rawValues) {
+			try {
+				bombTypes.add(SubscriptionParser.parseBombType(rawValue));
+			} catch (IllegalArgumentException ignored) {
+			}
+		}
+		return bombTypes;
+	}
+
+	private static List<ComboSubscription> parseSubscribedCombos(List<String> rawValues) {
+		List<ComboSubscription> combos = new ArrayList<>();
+		if (rawValues == null) {
+			return combos;
+		}
+		for (String rawValue : rawValues) {
+			try {
+				ComboSubscription comboSubscription = SubscriptionParser.parseEncodedCombo(rawValue);
+				if (!combos.contains(comboSubscription)) {
+					combos.add(comboSubscription);
+				}
+			} catch (IllegalArgumentException ignored) {
+			}
+		}
+		combos.sort(Comparator.comparing(ComboSubscription::encoded));
+		return combos;
 	}
 }
